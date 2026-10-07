@@ -81,4 +81,4 @@ prompt: |
 #     # Page reader — fetch a found URL's full text as markdown, with
 #     # JavaScript rendering (pair with any web_search above):
 #     # - name: web_read
-#     #   read_provider: jina         # keyless; or nimble / firecrawl with an api_key
+#     #   read_provider: jina         # keyless; or keenable (also keyless), nimble / firecrawl with an api_key

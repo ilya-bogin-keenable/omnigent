@@ -16,8 +16,8 @@ Usage in config.yaml::
     tools:
       builtins:
         - name: web_read
-          read_provider: nimble      # or firecrawl / jina
-          api_key: ${NIMBLE_API_KEY}   # keyed backends need it; jina is keyless
+          read_provider: nimble      # or firecrawl / jina / keenable
+          api_key: ${NIMBLE_API_KEY}   # keyed backends need it; jina and keenable are keyless
           # driver: vx8                # nimble only (auto/vx8/vx10/vx12, + -pro; vx6 plain HTTP)
           # output_format: markdown    # nimble only (markdown/html)
           # proxy: auto                # firecrawl only (basic/enhanced/auto)
@@ -75,7 +75,7 @@ class WebReadTool(Tool):
     Unified web-read tool: fetch one URL's content as clean markdown.
 
     The spec must set ``read_provider`` to one of the engines in the
-    ``_BACKENDS`` registry (``jina`` is keyless; ``nimble`` / ``firecrawl``
+    ``_BACKENDS`` registry (``jina`` and ``keenable`` are keyless; ``nimble`` / ``firecrawl``
     need credentials) — there is no default and no env var fallback, so the
     spec is self-contained and the engine used is explicit.
 
@@ -323,12 +323,27 @@ def _run_jina(url: str, config: dict[str, str]) -> tuple[str | None, str | None]
     return _read_jina(url, config)
 
 
+def _run_keenable(url: str, config: dict[str, str]) -> tuple[str | None, str | None]:
+    """
+    Read via Keenable (``/v1/fetch``); keyless by default, markdown with title.
+
+    :param url: The URL to read.
+    :param config: ``api_key`` optional (switches to the keyed endpoint and
+        lifts the rate limit).
+    :returns: ``(content, diagnostic)``; exactly one is non-None.
+    """
+    from omnigent.tools.builtins.web_read_keenable import _read_keenable
+
+    return _read_keenable(url, config)
+
+
 # Single source of truth for the selectable backends. To add an engine, write
 # its ``_run_*`` above and add one row here — the dispatch in ``_read`` and
 # the error hint below both derive from this map, so nothing else needs editing.
 # ``keyless`` drives only the hint wording (which engines need no ``api_key``).
 _BACKENDS: dict[str, _Backend] = {
     "jina": _Backend(_run_jina, keyless=True),
+    "keenable": _Backend(_run_keenable, keyless=True),
     "nimble": _Backend(_run_nimble, keyless=False, options=frozenset({"driver", "output_format"})),
     "firecrawl": _Backend(_run_firecrawl, keyless=False, options=frozenset({"proxy"})),
 }

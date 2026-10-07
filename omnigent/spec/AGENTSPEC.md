@@ -186,6 +186,9 @@ tools:
     - name: web_read
       read_provider: jina                # keyless (rate-limited); cheap default
     - name: web_read
+      read_provider: keenable            # keyless (rate-limited); markdown with the page title
+      # optional: api_key: ${KEENABLE_API_KEY} (lifts the rate limit)
+    - name: web_read
       read_provider: nimble              # browser-rendered; keyed
       api_key: ${NIMBLE_API_KEY}
       # optional: driver (auto | vx8 default | vx10 | vx12, + -pro variants | vx6 plain HTTP); output_format (markdown | html)
@@ -196,7 +199,11 @@ tools:
 ```
 
 - **`jina`** — Jina Reader. Keyless by default (an `api_key` only lifts the rate
-  limit). Fast and cheap for public pages; lightest-weight of the three.
+  limit). Fast and cheap for public pages; lighter-weight than the keyed backends.
+- **`keenable`**: Keenable page reader. Keyless by default (an `api_key` only
+  lifts the rate limit). Returns the page as markdown with its title; pairs with
+  the `keenable` `web_search` backend so one keyless provider covers both
+  finding and reading.
 - **`nimble`** — Nimble Web API. Browser-rendered for higher reliability on
   JavaScript-heavy pages. Requires `api_key`. Drivers (from Nimble's documented
   set): `vx8` (default, renders JS), higher tiers `vx10` / `vx12` and their

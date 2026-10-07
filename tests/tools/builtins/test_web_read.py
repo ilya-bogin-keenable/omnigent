@@ -128,6 +128,7 @@ def test_no_read_provider_fails_loudly(tool_ctx: ToolContext) -> None:
     assert result.startswith("web_read error: no read_provider")
     # The error names every available engine so the choice is explicit.
     assert "jina" in result.lower()
+    assert "keenable" in result.lower()
     assert "nimble" in result.lower()
     assert "firecrawl" in result.lower()
 
@@ -296,6 +297,132 @@ def test_jina_empty_content_message(tool_ctx: ToolContext) -> None:
         mock_get.return_value = fake_response
         result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
     assert "no content extracted" in result
+
+
+# ── read_provider: keenable (keyless) ──────────────
+
+
+def _keenable_response(**fields: object) -> MagicMock:
+    payload: dict[str, object] = {
+        "url": "https://example.com/",
+        "title": "Example Domain",
+        "content": "# Example Domain\n\nHello world.",
+        "description": "",
+    }
+    payload.update(fields)
+    fake_response = MagicMock()
+    fake_response.json.return_value = payload
+    return fake_response
+
+
+def test_keenable_backend_keyless_uses_public_endpoint(tool_ctx: ToolContext) -> None:
+    """
+    With read_provider=keenable and no api_key, the tool calls the keyless
+    public endpoint with the X-Keenable-Title header and returns the markdown;
+    it must NOT error on a missing key.
+    """
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.return_value = _keenable_response()
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+
+    assert "Hello world." in result
+    assert "api_key" not in result
+    url = mock_get.call_args.args[0]
+    params = mock_get.call_args.kwargs["params"]
+    headers = mock_get.call_args.kwargs["headers"]
+    assert url.endswith("/v1/fetch/public")
+    assert params["url"] == "https://example.com"
+    assert params["max_chars"] == 50_000
+    assert headers["X-Keenable-Title"] == "Omnigent"
+    assert "X-API-Key" not in headers
+
+
+def test_keenable_api_key_switches_to_keyed_endpoint(tool_ctx: ToolContext) -> None:
+    """When an api_key is present, the keyed endpoint is used with X-API-Key."""
+    tool = WebReadTool(config={"read_provider": "keenable", "api_key": "kn-key"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.return_value = _keenable_response()
+        tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+
+    url = mock_get.call_args.args[0]
+    headers = mock_get.call_args.kwargs["headers"]
+    assert url.endswith("/v1/fetch")
+    assert headers["X-API-Key"] == "kn-key"
+    assert headers["X-Keenable-Title"] == "Omnigent"
+
+
+def test_keenable_title_is_prepended_when_content_has_no_heading(tool_ctx: ToolContext) -> None:
+    """Plain-text content gets the page title as a heading so the model knows the page."""
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.return_value = _keenable_response(title="Docs", content="Plain body.")
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert "# Docs\n\nPlain body." in result
+
+
+def test_keenable_rate_limit_hint(tool_ctx: ToolContext) -> None:
+    """A 429 from keyless Keenable suggests setting an api_key."""
+    fake_response = MagicMock()
+    fake_response.status_code = 429
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.side_effect = httpx.HTTPStatusError(
+            "429", request=MagicMock(), response=fake_response
+        )
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert "429" in result
+    assert "api_key" in result
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [(401, "api_key"), (403, "api_key"), (400, "URL was rejected"), (404, "no page found")],
+)
+def test_keenable_http_errors_are_diagnostics(
+    tool_ctx: ToolContext, code: int, expected: str
+) -> None:
+    """Auth, bad-URL and not-found statuses come back as specific diagnostics."""
+    fake_response = MagicMock()
+    fake_response.status_code = code
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.side_effect = httpx.HTTPStatusError(
+            str(code), request=MagicMock(), response=fake_response
+        )
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert result.startswith(f"Keenable read error: HTTP {code}")
+    assert expected in result
+    assert not result.startswith("Source:")
+
+
+def test_keenable_request_error_returns_string(tool_ctx: ToolContext) -> None:
+    """A Keenable timeout/connect error is returned as a string, never raised."""
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.side_effect = httpx.ReadTimeout("slow")
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert result.startswith("Keenable read error:")
+
+
+def test_keenable_empty_content_message(tool_ctx: ToolContext) -> None:
+    """Empty Keenable content yields the no-content message, not a blank string."""
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.return_value = _keenable_response(content="   ")
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert "no content extracted" in result
+
+
+def test_keenable_non_json_response(tool_ctx: ToolContext) -> None:
+    """A non-JSON body is reported as a diagnostic, never raised."""
+    fake_response = MagicMock()
+    fake_response.json.side_effect = ValueError("not json")
+    tool = WebReadTool(config={"read_provider": "keenable"})
+    with patch("omnigent.tools.builtins.web_read_keenable.httpx.get") as mock_get:
+        mock_get.return_value = fake_response
+        result = tool.invoke(json.dumps({"url": "https://example.com"}), tool_ctx)
+    assert "non-JSON" in result
 
 
 # ── read_provider: nimble ──────────────────────────
@@ -845,6 +972,12 @@ def test_firecrawl_request_error_returns_string(tool_ctx: ToolContext) -> None:
             "json",
             {"success": True, "data": {"markdown": "Body."}},
         ),
+        (
+            "keenable",
+            "web_read_keenable.httpx.get",
+            "json",
+            {"url": "https://example.com/x", "title": "", "content": "Body."},
+        ),
     ],
 )
 def test_source_header_on_all_backends(
@@ -862,7 +995,7 @@ def test_source_header_on_all_backends(
         fake_response.json.return_value = response_value
 
     config = {"read_provider": provider}
-    if provider != "jina":
+    if provider not in ("jina", "keenable"):
         config["api_key"] = "k"
     tool = WebReadTool(config=config)
     with patch(f"omnigent.tools.builtins.{patch_target}") as mock_http:

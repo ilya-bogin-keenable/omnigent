@@ -344,7 +344,7 @@ _WEB_SEARCH_TOOLS = frozenset({"web_search"})
 
 # web_read — the bot-resistant single-URL fetch builtin. Runner-local (like
 # web_search) so a wrapped harness's web_read call resolves to the spec's
-# configured backend (nimble / firecrawl / jina) via WebReadTool.invoke.
+# configured backend (nimble / firecrawl / jina / keenable) via WebReadTool.invoke.
 _WEB_READ_TOOLS = frozenset({"web_read"})
 
 # nimble_research — Nimble Agent API v2 research runs (start → poll → result).
